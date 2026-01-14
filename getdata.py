@@ -32,7 +32,7 @@ row_height = (h - header_h - footer_h) / num_rows
 padding = 3  
 
 all_rows = []
-rides = ["Time", "Frozen", "Rapunzel", "PeterPan", "Tinker", "Soarin", "ToT", "ToyStory", "Indy", "Raging", "Journey"]
+rides = ["Time", "Frozen", "Rapunzel", "PeterPan", "Tinker", "Soarin", "ToT", "ToyStory", "Indy", "Raging", "Center"]
 
 print("Starting OCR extraction...")
 
