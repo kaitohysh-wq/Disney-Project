@@ -49,11 +49,9 @@ def process_single_image(img_url, config, retries=3):
         
         for c in range(1, config["num_cols"]):
             x_s, x_e = int(config["margin"] + (c * col_width)), int(config["margin"] + ((c+1) * col_width))
-            
-            # PERFECT ALIGNMENT CROP
             cell = img[y_s+2 : y_e-2, x_s+2 : x_e-2]
             
-            # --- ATTEMPT 1: Standard High-Contrast (Best for 0s) ---
+            # --- ATTEMPT 1: Your Standard Pass ---
             gray = cv2.cvtColor(cell, cv2.COLOR_BGR2GRAY)
             clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
             contrast = clahe.apply(gray)
@@ -64,20 +62,29 @@ def process_single_image(img_url, config, retries=3):
             result = reader.readtext(thresh, detail=0, allowlist='0123456789-休止', paragraph=False)
             raw_val = result[0] if result else "-"
 
-            # --- ATTEMPT 2: Sharpened & Bold (If Attempt 1 failed to find digits) ---
-            # If we only have a '-' or an empty result, we try again with 'Repair' mode
+            # --- ATTEMPT 2: Your Repair Pass ---
             if raw_val == "-" or not any(char.isdigit() for char in raw_val):
-                # Sharpening kernel to find thin lines of a '5'
-                kernel = np.array([[0, -1, 0], [-1, 5,-1], [0, -1, 0]])
-                sharpened = cv2.filter2D(scaled, -1, kernel)
-                # Dilate slightly to connect broken lines
                 repair_kernel = np.ones((2,2), np.uint8)
                 bold_thresh = cv2.erode(cv2.bitwise_not(thresh), repair_kernel, iterations=1)
                 bold_thresh = cv2.bitwise_not(bold_thresh)
-                
                 result_retry = reader.readtext(bold_thresh, detail=0, allowlist='0123456789-休止', paragraph=False)
-                if result_retry:
-                    raw_val = result_retry[0]
+                if result_retry: raw_val = result_retry[0]
+
+            # --- NEW ATTEMPT 3: Adaptive Gaussian Rescue (The 'Frozen' Saver) ---
+            # Specialized for dark red cells where Otsu fails
+            if raw_val == "-" or not any(char.isdigit() for char in raw_val):
+                adapt_thresh = cv2.adaptiveThreshold(scaled, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                                   cv2.THRESH_BINARY_INV, 15, 8)
+                # Clean noise while keeping digits thin to prevent '0' from filling in
+                kernel = np.ones((2,2), np.uint8)
+                cleaned = cv2.morphologyEx(adapt_thresh, cv2.MORPH_OPEN, kernel)
+                
+                result_final = reader.readtext(cleaned, detail=0, allowlist='0123456789-休止', paragraph=False)
+                if result_final:
+                    raw_val = result_final[0]
+                    # Log successful rescue
+                    if any(char.isdigit() for char in raw_val):
+                        print(f"      [RESCUE SUCCESS] {fixed_times[r]} | {config['rides'][c]}: {raw_val}")
 
             clean_val = "-" if any(char in raw_val for char in ["休", "止"]) else ("".join(filter(str.isdigit, raw_val)) or "-")
             row_data.append(clean_val)
@@ -87,7 +94,7 @@ def process_single_image(img_url, config, retries=3):
     return pd.DataFrame(all_cells, columns=config["rides"])
 
 # --- MAIN EXECUTION ---
-target_date = "20260112"
+target_date = "20260113"
 master_file = "disney_sea_history_master.csv"
 day_parts = []
 
