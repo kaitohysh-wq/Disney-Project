@@ -82,48 +82,66 @@ def process_single_image(img_url, config, retries=3):
                 result_final = reader.readtext(cleaned, detail=0, allowlist='0123456789-休止', paragraph=False)
                 if result_final:
                     raw_val = result_final[0]
-                    # Log successful rescue
-                    if any(char.isdigit() for char in raw_val):
-                        print(f"      [RESCUE SUCCESS] {fixed_times[r]} | {config['rides'][c]}: {raw_val}")
 
-            clean_val = "-" if any(char in raw_val for char in ["休", "止"]) else ("".join(filter(str.isdigit, raw_val)) or "-")
+            clean_val = "CLOSED" if any(char in raw_val for char in ["休", "止"]) else ("".join(filter(str.isdigit, raw_val)) or "-")
             row_data.append(clean_val)
             
         all_cells.append(row_data)
     
     return pd.DataFrame(all_cells, columns=config["rides"])
 
-# --- MAIN EXECUTION ---
-target_date = "20260113"
-master_file = "disney_sea_history_master.csv"
-day_parts = []
+# --- MAIN EXECUTION: DATE RANGE LOOP ---
+start_date = "2025-04-01"
+end_date = "2025-04-05"
+master_file = "disney_sea_april_history.csv"
 
-print(f"Starting extraction for {target_date}...")
+# Generate the list of dates to process
+date_list = pd.date_range(start=start_date, end=end_date).strftime("%Y%m%d").tolist()
 
-for key, config in image_configs.items():
-    url = f"https://disneyreal.asumirai.info/realtime/images/sea-wait-{target_date}{config['suffix']}"
-    print(f"  > Processing {key}...")
+print(f"Starting multi-day extraction for {len(date_list)} days...")
+
+for target_date in date_list:
+    day_parts = []
+    print(f"\nProcessing Date: {target_date}")
     
-    df_part = process_single_image(url, config)
-    if not df_part.empty:
-        day_parts.append(df_part)
+    for key, config in image_configs.items():
+        url = f"https://disneyreal.asumirai.info/realtime/images/sea-wait-{target_date}{config['suffix']}"
+        print(f"  > Group: {key}...")
+        
+        try:
+            df_part = process_single_image(url, config)
+            if not df_part.empty:
+                day_parts.append(df_part)
+        except Exception as e:
+            print(f"    ! Error processing {key} on {target_date}: {e}")
 
-    print("    Pausing 8 seconds...")
-    time.sleep(8)
+        # Pause to avoid rate-limiting
+        time.sleep(5)
 
-if day_parts:
-    final_df = day_parts[0]
-    for i in range(1, len(day_parts)):
-        next_df = day_parts[i]
-        final_df = pd.merge(final_df, next_df, on="Time", how="outer")
+    if day_parts:
+        # 1. Anchor all 4 tables on the "Time" column
+        final_df = day_parts[0]
+        for i in range(1, len(day_parts)):
+            next_df = day_parts[i]
+            final_df = pd.merge(final_df, next_df, on="Time", how="outer")
 
-    if "Date" not in final_df.columns:
-        final_df.insert(0, "Date", target_date)
+        # 2. Add Date column at the start
+        if "Date" not in final_df.columns:
+            final_df.insert(0, "Date", target_date)
 
-    file_exists = os.path.exists(master_file)
-    final_df.to_csv(master_file, mode='a', index=False, header=not file_exists)
-    
-    print(f"\nSUCCESS: Data for {target_date} saved to {master_file}")
-    print(final_df.head())
-else:
-    print("Failed to extract data.")
+        # 3. Whole-Day CLOSED Logic (Maintenance Broadcast)
+        for ride in final_df.columns:
+            if ride in ["Date", "Time"]: continue
+            if "CLOSED" in final_df[ride].values:
+                final_df[ride] = "CLOSED"
+
+        # 4. Save/Append to CSV
+        # header=not os.path.exists(master_file) ensures headers only at the top
+        file_exists = os.path.exists(master_file)
+        final_df.to_csv(master_file, mode='a', index=False, header=not file_exists)
+        
+        print(f"SUCCESS: Data for {target_date} appended to {master_file}")
+    else:
+        print(f"FAILED: No data extracted for {target_date}")
+
+print("\n--- ALL DAYS COMPLETE ---")
