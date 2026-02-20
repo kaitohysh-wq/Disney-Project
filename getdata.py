@@ -91,8 +91,9 @@ def process_single_image(img_url, config, retries=3):
     return pd.DataFrame(all_cells, columns=config["rides"])
 
 # --- MAIN EXECUTION: DATE RANGE LOOP ---
-start_date = "2025-04-01"
-end_date = "2025-04-05"
+start_date = "2025-09-09"
+end_date = "2025-09-30"
+skip_dates = ["20250801", "20250919", "20250929"]
 master_file = "disney_sea_april_history.csv"
 
 # Generate the list of dates to process
@@ -101,6 +102,10 @@ date_list = pd.date_range(start=start_date, end=end_date).strftime("%Y%m%d").tol
 print(f"Starting multi-day extraction for {len(date_list)} days...")
 
 for target_date in date_list:
+    if target_date in skip_dates:
+        print(f"\n>>> Skipping {target_date} (User requested skip)")
+        continue
+    
     day_parts = []
     print(f"\nProcessing Date: {target_date}")
     
